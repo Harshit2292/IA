@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import shap
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
@@ -14,20 +15,34 @@ from mlxtend.frequent_patterns import apriori, association_rules
 
 st.set_page_config(page_title="Credit Intelligence System", layout="wide")
 
-st.title("🚀 Credit Intelligence System")
+st.title("🚀 Credit Intelligence System (Final Version)")
 
 # =========================
 # LOAD DATA
 # =========================
 df = pd.read_csv("data.csv")
 
-st.subheader("📊 Raw Dataset")
+st.subheader("📊 Dataset Preview")
 st.dataframe(df.head())
 
 # =========================
-# FIX TARGET COLUMN
+# TARGET FIX
 # =========================
-df["LoanStatus"] = df["LoanStatus"].map({"Approved": 1, "Rejected": 0})
+df["LoanStatus"] = df["LoanStatus"].map({"Approved":1,"Rejected":0})
+
+# =========================
+# DROP ID
+# =========================
+df = df.drop("Applicant_ID", axis=1)
+
+# =========================
+# FEATURE ENGINEERING
+# =========================
+df["MarketingScore"] = (
+    (df["Income"]/100000)*0.4 +
+    (1 - df["DTI_Ratio"])*0.3 +
+    (1 - df["Late_Payments"]/10)*0.3
+)
 
 # =========================
 # ENCODING
@@ -38,7 +53,7 @@ X = df_encoded.drop("LoanStatus", axis=1)
 y = df_encoded["LoanStatus"]
 
 # =========================
-# TRAIN TEST SPLIT
+# SPLIT
 # =========================
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
@@ -55,6 +70,9 @@ models = {
 
 st.header("📈 Model Performance")
 
+best_model = None
+best_acc = 0
+
 for name, model in models.items():
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
@@ -66,23 +84,23 @@ for name, model in models.items():
 
     st.subheader(name)
     st.write({
-        "Accuracy": round(acc, 3),
-        "Precision": round(pre, 3),
-        "Recall": round(rec, 3),
-        "F1 Score": round(f1, 3)
+        "Accuracy": round(acc,3),
+        "Precision": round(pre,3),
+        "Recall": round(rec,3),
+        "F1 Score": round(f1,3)
     })
 
-    # ROC Curve
+    if acc > best_acc:
+        best_acc = acc
+        best_model = model
+
     if hasattr(model, "predict_proba"):
-        y_prob = model.predict_proba(X_test)[:, 1]
+        y_prob = model.predict_proba(X_test)[:,1]
         fpr, tpr, _ = roc_curve(y_test, y_prob)
         roc_auc = auc(fpr, tpr)
 
-        fig = px.line(
-            x=fpr,
-            y=tpr,
-            title=f"ROC Curve - {name} (AUC={round(roc_auc,2)})"
-        )
+        fig = px.line(x=fpr, y=tpr,
+                      title=f"ROC Curve - {name} (AUC={round(roc_auc,2)})")
         st.plotly_chart(fig)
 
 # =========================
@@ -102,6 +120,18 @@ fig = px.bar(importance.head(10), x="Importance", y="Feature", orientation='h')
 st.plotly_chart(fig)
 
 # =========================
+# SHAP EXPLAINABILITY
+# =========================
+st.header("🧠 Model Explainability (SHAP)")
+
+explainer = shap.TreeExplainer(rf)
+shap_values = explainer.shap_values(X_test)
+
+fig, ax = plt.subplots()
+shap.summary_plot(shap_values, X_test, show=False)
+st.pyplot(fig)
+
+# =========================
 # CLUSTERING
 # =========================
 st.header("🧠 Customer Segmentation")
@@ -109,7 +139,7 @@ st.header("🧠 Customer Segmentation")
 kmeans = KMeans(n_clusters=3, random_state=42)
 df["Cluster"] = kmeans.fit_predict(X)
 
-fig = px.scatter(df, x="Income", y="Debt", color=df["Cluster"].astype(str))
+fig = px.scatter(df, x="Income", y="DTI_Ratio", color=df["Cluster"].astype(str))
 st.plotly_chart(fig)
 
 # =========================
@@ -117,52 +147,59 @@ st.plotly_chart(fig)
 # =========================
 st.header("🔗 Association Rules")
 
-try:
-    df_rules = pd.get_dummies(df[["Risk", "LoanStatus"]])
-    freq = apriori(df_rules, min_support=0.1, use_colnames=True)
-    rules = association_rules(freq, metric="confidence", min_threshold=0.6)
+df_rules = pd.get_dummies(df[["Risk","LoanStatus"]])
+freq = apriori(df_rules, min_support=0.1, use_colnames=True)
+rules = association_rules(freq, metric="confidence", min_threshold=0.6)
 
-    st.dataframe(rules[["antecedents", "consequents", "confidence", "lift"]])
-
-except Exception as e:
-    st.error(f"Association rules error: {e}")
+st.dataframe(rules[["antecedents","consequents","confidence","lift"]])
 
 # =========================
-# PREDICTION SECTION
+# CREDIT SCORE PREDICTION
+# =========================
+st.header("💳 Credit Score Prediction")
+
+reg = RandomForestClassifier()
+reg.fit(X, df["CreditScore"])
+
+pred_score = reg.predict(X_test)
+
+st.write("Model trained to estimate credit score.")
+
+# =========================
+# PREDICTION
 # =========================
 st.header("🔮 Predict New Customer")
 
-income = st.number_input("Income", 20000, 100000, 40000)
-debt = st.number_input("Debt", 0, 100000, 20000)
-emi = st.slider("EMI (%)", 0, 100, 30)
-late = st.slider("Late Payments", 0, 10, 1)
-emp = st.selectbox("Employment", ["Salaried", "SelfEmployed"])
+income = st.number_input("Income",20000,100000,40000)
+debt = st.number_input("Debt",0,100000,20000)
+emi = st.slider("EMI Ratio",0,100,30)
+late = st.slider("Late Payments",0,10,1)
+emp = st.selectbox("Employment",["Salaried","SelfEmployed"])
+
+dti = debt / income
 
 input_dict = {
     "Income": income,
     "Debt": debt,
-    "EMI": emi,
-    "Late": late,
+    "EMI_Ratio": emi,
+    "Late_Payments": late,
     "Employment": emp,
     "CreditScore": 700,
-    "Risk": "Medium"
+    "DTI_Ratio": dti,
+    "Risk": "Medium",
+    "MarketingScore": 0.5
 }
 
 input_df = pd.DataFrame([input_dict])
 
-# Encode input
 input_encoded = pd.get_dummies(input_df)
-
-# Match columns
 input_encoded = input_encoded.reindex(columns=X.columns, fill_value=0)
 
-# Train final model
-final_model = RandomForestClassifier()
-final_model.fit(X, y)
+best_model.fit(X, y)
 
 if st.button("Predict"):
-    pred = final_model.predict(input_encoded)[0]
-    prob = final_model.predict_proba(input_encoded)[0][1]
+    pred = best_model.predict(input_encoded)[0]
+    prob = best_model.predict_proba(input_encoded)[0][1]
 
     if pred == 1:
         st.success(f"✅ Approved (Confidence: {round(prob,2)})")
@@ -170,20 +207,32 @@ if st.button("Predict"):
         st.error(f"❌ Rejected (Confidence: {round(prob,2)})")
 
 # =========================
+# MARKETING INSIGHTS
+# =========================
+st.header("🎯 Marketing Targeting")
+
+high_value = df[df["MarketingScore"] > 0.6]
+
+st.write(f"High Value Customers: {len(high_value)}")
+
+fig = px.histogram(df, x="MarketingScore", title="Customer Targeting Distribution")
+st.plotly_chart(fig)
+
+# =========================
 # FILE UPLOAD
 # =========================
 st.header("📂 Upload New Data")
 
-file = st.file_uploader("Upload CSV for Batch Prediction")
+file = st.file_uploader("Upload CSV")
 
 if file:
     new_df = pd.read_csv(file)
+    new_df = new_df.drop("Applicant_ID", axis=1, errors="ignore")
 
     new_encoded = pd.get_dummies(new_df)
     new_encoded = new_encoded.reindex(columns=X.columns, fill_value=0)
 
-    preds = final_model.predict(new_encoded)
-
-    new_df["Prediction"] = np.where(preds == 1, "Approved", "Rejected")
+    preds = best_model.predict(new_encoded)
+    new_df["Prediction"] = np.where(preds==1,"Approved","Rejected")
 
     st.dataframe(new_df.head())

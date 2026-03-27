@@ -16,39 +16,39 @@ st.set_page_config(page_title="Credit Intelligence System", layout="wide")
 
 st.title("🚀 Credit Intelligence System")
 
-# -------------------------------
+# =========================
 # LOAD DATA
-# -------------------------------
+# =========================
 df = pd.read_csv("data.csv")
 
 st.subheader("📊 Raw Dataset")
 st.dataframe(df.head())
 
-# -------------------------------
-# PREPROCESSING
-# -------------------------------
+# =========================
+# FIX TARGET COLUMN
+# =========================
+df["LoanStatus"] = df["LoanStatus"].map({"Approved": 1, "Rejected": 0})
+
+# =========================
+# ENCODING
+# =========================
 df_encoded = pd.get_dummies(df, drop_first=True)
 
-# Target column fix
-if "LoanStatus_Approved" in df_encoded.columns:
-    target = "LoanStatus_Approved"
-else:
-    st.error("Target column not found!")
-    st.stop()
+X = df_encoded.drop("LoanStatus", axis=1)
+y = df_encoded["LoanStatus"]
 
-X = df_encoded.drop(target, axis=1)
-y = df_encoded[target]
-
-# Train-test split
+# =========================
+# TRAIN TEST SPLIT
+# =========================
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-# -------------------------------
-# MODEL TRAINING
-# -------------------------------
+# =========================
+# MODELS
+# =========================
 models = {
-    "Logistic Regression": LogisticRegression(max_iter=1000, solver='liblinear'),
+    "Logistic Regression": LogisticRegression(max_iter=1000, solver="liblinear"),
     "Decision Tree": DecisionTreeClassifier(),
     "Random Forest": RandomForestClassifier()
 }
@@ -56,43 +56,39 @@ models = {
 st.header("📈 Model Performance")
 
 for name, model in models.items():
-    try:
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
 
-        acc = accuracy_score(y_test, y_pred)
-        pre = precision_score(y_test, y_pred)
-        rec = recall_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
+    acc = accuracy_score(y_test, y_pred)
+    pre = precision_score(y_test, y_pred)
+    rec = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
 
-        st.subheader(name)
-        st.write({
-            "Accuracy": round(acc, 3),
-            "Precision": round(pre, 3),
-            "Recall": round(rec, 3),
-            "F1 Score": round(f1, 3)
-        })
+    st.subheader(name)
+    st.write({
+        "Accuracy": round(acc, 3),
+        "Precision": round(pre, 3),
+        "Recall": round(rec, 3),
+        "F1 Score": round(f1, 3)
+    })
 
-        # ROC Curve
-        if hasattr(model, "predict_proba"):
-            y_prob = model.predict_proba(X_test)[:, 1]
-            fpr, tpr, _ = roc_curve(y_test, y_prob)
-            roc_auc = auc(fpr, tpr)
+    # ROC Curve
+    if hasattr(model, "predict_proba"):
+        y_prob = model.predict_proba(X_test)[:, 1]
+        fpr, tpr, _ = roc_curve(y_test, y_prob)
+        roc_auc = auc(fpr, tpr)
 
-            fig = px.line(
-                x=fpr,
-                y=tpr,
-                title=f"ROC Curve - {name} (AUC={round(roc_auc,2)})"
-            )
-            st.plotly_chart(fig)
+        fig = px.line(
+            x=fpr,
+            y=tpr,
+            title=f"ROC Curve - {name} (AUC={round(roc_auc,2)})"
+        )
+        st.plotly_chart(fig)
 
-    except Exception as e:
-        st.error(f"{name} failed: {e}")
-
-# -------------------------------
+# =========================
 # FEATURE IMPORTANCE
-# -------------------------------
-st.header("🔥 Feature Importance (Random Forest)")
+# =========================
+st.header("🔥 Feature Importance")
 
 rf = RandomForestClassifier()
 rf.fit(X_train, y_train)
@@ -105,22 +101,20 @@ importance = pd.DataFrame({
 fig = px.bar(importance.head(10), x="Importance", y="Feature", orientation='h')
 st.plotly_chart(fig)
 
-# -------------------------------
+# =========================
 # CLUSTERING
-# -------------------------------
+# =========================
 st.header("🧠 Customer Segmentation")
 
 kmeans = KMeans(n_clusters=3, random_state=42)
-clusters = kmeans.fit_predict(X)
-
-df["Cluster"] = clusters
+df["Cluster"] = kmeans.fit_predict(X)
 
 fig = px.scatter(df, x="Income", y="Debt", color=df["Cluster"].astype(str))
 st.plotly_chart(fig)
 
-# -------------------------------
+# =========================
 # ASSOCIATION RULES
-# -------------------------------
+# =========================
 st.header("🔗 Association Rules")
 
 try:
@@ -133,9 +127,9 @@ try:
 except Exception as e:
     st.error(f"Association rules error: {e}")
 
-# -------------------------------
+# =========================
 # PREDICTION SECTION
-# -------------------------------
+# =========================
 st.header("🔮 Predict New Customer")
 
 income = st.number_input("Income", 20000, 100000, 40000)
@@ -156,10 +150,10 @@ input_dict = {
 
 input_df = pd.DataFrame([input_dict])
 
-# Match encoding
+# Encode input
 input_encoded = pd.get_dummies(input_df)
 
-# Align columns
+# Match columns
 input_encoded = input_encoded.reindex(columns=X.columns, fill_value=0)
 
 # Train final model
@@ -175,17 +169,17 @@ if st.button("Predict"):
     else:
         st.error(f"❌ Rejected (Confidence: {round(prob,2)})")
 
-# -------------------------------
+# =========================
 # FILE UPLOAD
-# -------------------------------
+# =========================
 st.header("📂 Upload New Data")
 
 file = st.file_uploader("Upload CSV for Batch Prediction")
 
 if file:
     new_df = pd.read_csv(file)
-    new_encoded = pd.get_dummies(new_df)
 
+    new_encoded = pd.get_dummies(new_df)
     new_encoded = new_encoded.reindex(columns=X.columns, fill_value=0)
 
     preds = final_model.predict(new_encoded)
